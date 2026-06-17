@@ -1,0 +1,6 @@
+{
+  "name": "Atlas AI",
+  "description": "Atlas AI - Professional server-backed agent and expert consultant for business decisions",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
