@@ -546,15 +546,15 @@ function saveMemoryState(sessionId: string, state: any) {
 function mapModelToRouterAI(selectedModel: string): string {
   const modelLower = selectedModel.toLowerCase();
   if (modelLower.includes("deepseek") || modelLower.includes("reasoner") || modelLower.includes("r1")) {
-    return "deepseek-r1";
+    return "deepseek/deepseek-r1";
   }
   if (modelLower.includes("claude") || modelLower.includes("sonnet")) {
-    return "claude-3-5-sonnet";
+    return "anthropic/claude-sonnet-4.6";
   }
   if (modelLower.includes("gpt-4o") && !modelLower.includes("mini")) {
-    return "gpt-4o";
+    return "openai/gpt-4o";
   }
-  return "gpt-4o-mini";
+  return "openai/gpt-4o-mini";
 }
 
 function cleanAndParseJson(raw: string): any {
@@ -786,7 +786,7 @@ app.post("/api/gemini/chat", async (req, res) => {
           content: userContentPayload
         });
 
-        const routerResponse = await fetch("https://api.routerai.ru/v1/chat/completions", {
+        const routerResponse = await fetch("https://routerai.ru/api/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

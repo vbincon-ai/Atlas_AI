@@ -106,7 +106,7 @@ export default function SettingsView({
             <div className="flex justify-between items-center bg-slate-50 p-3.5 border border-slate-200 rounded-lg">
               <div>
                 <p className="font-bold text-slate-800">API Шлюз Router AI:</p>
-                <p className="font-mono text-[11px] text-blue-600 mt-0.5">https://api.routerai.ru/v1</p>
+                <p className="font-mono text-[11px] text-blue-600 mt-0.5">https://routerai.ru/api/v1</p>
               </div>
               <span className="bg-emerald-50 text-emerald-700 text-[9px] font-mono tracking-wider uppercase font-bold px-2 py-0.5 rounded-full border border-emerald-200">
                 Active Proxy
