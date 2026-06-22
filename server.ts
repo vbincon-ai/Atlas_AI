@@ -9,7 +9,7 @@ import PDFDocument from "pdfkit";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = 8080;
 
 // Setup larger limits to support image/attachment base64 uploads
 app.use(express.json({ limit: "25mb" }));
@@ -38,8 +38,8 @@ if (!fs.existsSync(MEMORY_DIR)) {
 }
 
 // PDF Support Fonts with Russian Cyrillic Glyphs (Roboto)
-const REGULAR_FONT_URL = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/roboto/static/Roboto-Regular.ttf";
-const BOLD_FONT_URL = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/roboto/static/Roboto-Bold.ttf";
+const REGULAR_FONT_URL = "https://cdnjs.cloudflare.com/ajax/libs/roboto-fontface/0.10.0/fonts/roboto/Roboto-Regular.ttf";
+const BOLD_FONT_URL = "https://cdnjs.cloudflare.com/ajax/libs/roboto-fontface/0.10.0/fonts/roboto/Roboto-Bold.ttf";
 
 const robotoRegularPath = path.join(MEMORY_DIR, "Roboto-Regular.ttf");
 const robotoBoldPath = path.join(MEMORY_DIR, "Roboto-Bold.ttf");
@@ -274,25 +274,10 @@ function prePopulateAssets() {
 }
 prePopulateAssets();
 
-// Standard Gemini client
+// Standard Gemini client (Disabled by user request)
 let aiClient: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI | null {
-  if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      console.warn("GEMINI_API_KEY is not defined. Using adaptive mockup routing mode.");
-      return null;
-    }
-    aiClient = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build'
-        }
-      }
-    });
-  }
-  return aiClient;
+  return null;
 }
 
 // 1. ENDPOINT: GET /api/workfiles - Listing files in host directory /root/data/workfiles
