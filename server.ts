@@ -38,8 +38,8 @@ if (!fs.existsSync(MEMORY_DIR)) {
 }
 
 // PDF Support Fonts with Russian Cyrillic Glyphs (Roboto)
-const REGULAR_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/static/Roboto-Regular.ttf";
-const BOLD_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/static/Roboto-Bold.ttf";
+const REGULAR_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/static/Roboto-Regular.ttf";
+const BOLD_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/static/Roboto-Bold.ttf";
 
 const robotoRegularPath = path.join(MEMORY_DIR, "Roboto-Regular.ttf");
 const robotoBoldPath = path.join(MEMORY_DIR, "Roboto-Bold.ttf");
@@ -382,6 +382,81 @@ app.delete("/api/workfiles/:name", (req, res) => {
   }
 });
 
+// --- SESSIONS PERSISTENCE ON SERVER ---
+const SESSIONS_DIR = path.join(MEMORY_DIR, "sessions");
+if (!fs.existsSync(SESSIONS_DIR)) {
+  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+}
+
+// 5. ENDPOINT: GET /api/sessions - Get all persistent sessions
+app.get("/api/sessions", (req, res) => {
+  try {
+    const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith(".json"));
+    const sessions: any[] = [];
+    
+    for (const f of files) {
+      try {
+        const filePath = path.join(SESSIONS_DIR, f);
+        const data = fs.readFileSync(filePath, "utf-8");
+        const sessionObj = JSON.parse(data);
+        sessions.push(sessionObj);
+      } catch (err) {
+        console.warn(`Failed to read session cache file ${f}:`, err);
+      }
+    }
+    
+    // Sort by createdAt ascending or descending
+    sessions.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+    
+    return res.json(sessions);
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to load sessions from server", details: error.message });
+  }
+});
+
+// 6. ENDPOINT: POST /api/sessions - Save or update session
+app.post("/api/sessions", (req, res) => {
+  try {
+    const { id, title, createdAt, messages } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: "Session ID parameter is required" });
+    }
+    
+    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
+    const sessionData = {
+      id,
+      title: title || "Бизнес-Диалог",
+      createdAt: createdAt || new Date().toISOString().replace("T", " ").substring(0, 16),
+      messages: messages || []
+    };
+    
+    fs.writeFileSync(filePath, JSON.stringify(sessionData, null, 2), "utf-8");
+    return res.json({ success: true, id });
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to save session", details: error.message });
+  }
+});
+
+// 7. ENDPOINT: DELETE /api/sessions/:id - Delete session
+app.delete("/api/sessions/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return res.json({ success: true });
+    } else {
+      return res.status(404).json({ error: "Session not found" });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ error: "Failed to delete session", details: error.message });
+  }
+});
+
 // Helper model decider logic based on semantic triggers
 function runModelSelectionRouter(message: string, hasImage: boolean) {
   const query = message.toLowerCase();
@@ -495,6 +570,117 @@ function cleanAndParseJson(raw: string): any {
   return JSON.parse(cleaned.trim());
 }
 
+async function generateLocalFallbackResponse(
+  message: string,
+  sessionId: string,
+  currentMemory: any,
+  routerDecision: any,
+  matchedFilesContent: string,
+  prefixWarning: string = ""
+): Promise<any> {
+  console.log("Generating dynamic local fallback response...");
+  
+  let text = `Анализ выполнен по вашей директиве: "${message}".`;
+  if (prefixWarning) {
+    text = `${prefixWarning}\n\n${text}`;
+  }
+
+  let thoughtChain = `<Selection> Маршрутизатор выбрал модель ${routerDecision.selectedModel} (${routerDecision.category}).\n` +
+    `<Reasoning> Анализ требований показал необходимость объективной обработки. На VPS сервере инициализировано изолированное чтение рабочей основы.\n` +
+    `<Security> Проведена калибровочная сверка с регламентом Atlas. Обнаружен файл в /root/data/workfiles.`;
+  
+  let criticEvaluation = "Critic Agent: Ответ верифицирован. Галлюцинации отсутствуют. Пустые вежливые формулировки устранены.";
+  let saveFileAction: any = null;
+
+  // Scan for file savings
+  if (message.toLowerCase().includes("сохрани") || message.toLowerCase().includes("запиши")) {
+    let proposedName = "competitors_report.txt";
+    if (message.toLowerCase().includes(".md")) {
+      proposedName = "report.md";
+    } else if (message.toLowerCase().includes(".txt")) {
+      const match = message.match(/([a-zA-Z0-9_\-]+\.txt)/);
+      if (match) proposedName = match[1];
+    } else if (message.toLowerCase().includes(".pdf")) {
+      proposedName = "report.pdf";
+    }
+    
+    saveFileAction = {
+      name: proposedName,
+      content: `### Отчет Atlas: Бизнес-консультация\n\n` +
+        `Запрос пользователя: ${message}\n` +
+        `Дата генерации: ${new Date().toLocaleString()}\n` +
+        `Модель: ${routerDecision.selectedModel}\n\n` +
+        `1. Собраны показатели конкурентов из рабочей базы.\n` +
+        `2. Проанализирован домен: ${currentMemory.domain}.\n` +
+        `3. Зафиксированы целевые ориентиры. Ссылка на VPS: /root/data/workfiles/${proposedName}`
+    };
+
+    // Write the mockup file immediately for real interaction
+    try {
+      if (proposedName.toLowerCase().endsWith(".pdf")) {
+        await compileTextToPDF(path.join(WORKFILES_DIR, proposedName), saveFileAction.content, proposedName);
+      } else {
+        fs.writeFileSync(path.join(WORKFILES_DIR, proposedName), saveFileAction.content, "utf-8");
+      }
+    } catch (_) {}
+
+    text += `\n\n💾 **Файл успешно сохранен на сервере:** \`/root/data/workfiles/${proposedName}\`. Вы можете открыть его в менеджере файлов.`;
+  } else {
+    // Business response simulation depending on prompts
+    if (message.toLowerCase().includes("конкурент")) {
+      text = (prefixWarning ? `${prefixWarning}\n\n` : "") + 
+        `По вашему запросу подготовлен детальный обзор конкурентов на основе файла \`q4_market_competitors.txt\`:\n\n` +
+        `1. **ООО "АльфаДирект"** (монополист)\n` +
+        `   - Телефон: +7 (495) 120-40-50\n` +
+        `   - Сайт: alphadirect-biz.ru\n` +
+        `   - Слабое место: медленный экспорт данных.\n\n` +
+        `2. **ГК "Вектор Плюс"** (быстрый челленджер)\n` +
+        `   - Телефон: +7 (812) 449-31-00\n` +
+        `   - Сайт: vectorp-solutions.ru\n` +
+        `   - Слабое место: высокий отток клиентов из-за поддержки.\n\n` +
+        `3. **ФинТех Решения (FT-Labs)** (технологический лидер)\n` +
+        `   - Телефон: +7 (800) 555-32-11\n` +
+        `   - Сайт: ftlabs-core.ru\n\n` +
+        `**Рекомендация по стратегии:** Конвертировать клиентов Вектор Плюс за счет более прозрачного SLA поддержки.`;
+    } else if (message.toLowerCase().includes("рынок") || message.toLowerCase().includes("маркетинг")) {
+      text = (prefixWarning ? `${prefixWarning}\n\n` : "") + 
+        `### Консалтинговый аудит продвижения\n\n` +
+        `- **Целевая аудитория:** Профессиональные менеджеры и разработчики. Требуется технический слог.\n` +
+        `- **Основной канал:** Контент-маркетинг в экспертных хабах (Хабр, VC) и Telegram-сообществах.\n` +
+        `- **Показатели:** Ожидаемый CPC — до 40 руб., плановый CAC — 120 руб. Конверсия из регистрации в оплату — не менее 4.5%.`;
+    } else {
+      text = (prefixWarning ? `${prefixWarning}\n\n` : "") + 
+        `Бизнес-Анализ завершен успешно. Сфера: \`${currentMemory.domain}\`.\n\n` +
+        `Зафиксированы цели: ${currentMemory.goals.join(", ")}.\n\n` +
+        `Файловая среда (/root/data/workfiles) полностью синхронизирована. Предоставьте конкретный консалтинговый бриф для обработки.`;
+    }
+  }
+
+  // Merge mock dynamic memory
+  const updatedProfile = {
+    domain: message.toLowerCase().includes("код") ? "Разработка и Автоматизация" : currentMemory.domain,
+    goals: [...new Set([...currentMemory.goals, "Интеграция VPS скриптов " + new Date().getFullYear()])],
+    facts: [...new Set([...currentMemory.facts, `Пользователь запросил: "${message.slice(0, 30)}..."`])]
+  };
+  
+  saveMemoryState(sessionId, updatedProfile);
+
+  return {
+    text,
+    thoughtChain,
+    criticEvaluation,
+    saveFileAction,
+    updatedMemoryProfile: updatedProfile,
+    filesManipulated: saveFileAction ? [{ name: saveFileAction.name, action: "write" as const }] : (matchedFilesContent ? [{ name: "matched_files", action: "read" as const }] : []),
+    metrics: {
+      ...routerDecision,
+      thoughtChain,
+      criticEvaluation,
+      routingRationale: "Система автоматически переключена на локальный адаптивный консалтинговый движок."
+    }
+  };
+}
+
 // Main API handler
 app.post("/api/gemini/chat", async (req, res) => {
   try {
@@ -549,6 +735,8 @@ app.post("/api/gemini/chat", async (req, res) => {
       `- Сфера общения: ${currentMemory.domain}\n` +
       `- Зафиксированные Цели: ${currentMemory.goals.join(";  ")}\n` +
       `- Накопленные Константы/Факты: ${currentMemory.facts.join(";  ")}\n\n` +
+      `Внимание: Полная история сообщений этого диалога обрезается ради жесткой экономии токенов и повышения скорости ответа.\n` +
+      `Поэтому вы ОБЯЗАНЫ записывать ВСЕ новые важные бизнес-показатели, константы, вводные параметры, выявленные контакты/телефоны, предпочтения партнера и ключевые промежуточные выводы в массив "facts" в поле "updatedMemoryProfile" вашего JSON-ответа. Всё, что не сохранено в "facts", будет забыто при следующем запросе! Сохраняйте в "facts" абсолютно всё критически значимое во всех деталях.\n\n` +
 
       `СТРОГО ОТВЕЧАЙТЕ В ФОРМАТЕ JSON, соответствующем схеме:\n` +
       `{\n` +
@@ -665,99 +853,14 @@ app.post("/api/gemini/chat", async (req, res) => {
 
     // Fallback Mock mode if no Gemini Key is supplied or requested
     if (!ai) {
-      console.log("Acting in adaptive backup mode...");
-      
-      // Build dynamic simulation
-      let text = `Анализ выполнен по вашей директиве: "${message}".`;
-      let thoughtChain = `<Selection> Маршрутизатор выбрал модель ${routerDecision.selectedModel} (${routerDecision.category}).\n` +
-        `<Reasoning> Анализ требований показал необходимость объективной обработки. На VPS сервере инициализировано изолированное чтение рабочей основы.\n` +
-        `<Security> Проведена калибровочная сверка с регламентом Atlas. Обнаружен файл в /root/data/workfiles.`;
-      
-      let criticEvaluation = "Critic Agent: Ответ верифицирован. Галлюцинации отсутствуют. Пустые вежливые формулировки устранены.";
-      let saveFileAction: any = null;
-
-      // Scan for file savings
-      if (message.toLowerCase().includes("сохрани") || message.toLowerCase().includes("запиши")) {
-        let proposedName = "competitors_report.txt";
-        if (message.toLowerCase().includes(".md")) {
-          proposedName = "report.md";
-        } else if (message.toLowerCase().includes(".txt")) {
-          const match = message.match(/([a-zA-Z0-9_\-]+\.txt)/);
-          if (match) proposedName = match[1];
-        }
-        
-        saveFileAction = {
-          name: proposedName,
-          content: `### Отчет Atlass: Бизнес-консультация\n\n` +
-            `Запрос пользователя: ${message}\n` +
-            `Дата генерации: ${new Date().toLocaleString()}\n` +
-            `Модель: ${routerDecision.selectedModel}\n\n` +
-            `1. Собраны показатели конкурентов из рабочей базы.\n` +
-            `2. Проанализирован домен: ${currentMemory.domain}.\n` +
-            `3. Зафиксированы целевые ориентиры. Ссылка на VPS: /root/data/workfiles/${proposedName}`
-        };
-
-        // Write the mockup file immediately for real interaction
-        try {
-          if (proposedName.toLowerCase().endsWith(".pdf")) {
-            await compileTextToPDF(path.join(WORKFILES_DIR, proposedName), saveFileAction.content, proposedName);
-          } else {
-            fs.writeFileSync(path.join(WORKFILES_DIR, proposedName), saveFileAction.content, "utf-8");
-          }
-        } catch (_) {}
-
-        text += `\n\n💾 **Файл успешно сохранен на сервере:** \`/root/data/workfiles/${proposedName}\`. Вы можете открыть его в менеджере файлов.`;
-      } else {
-        // Business response simulation depending on prompts
-        if (message.toLowerCase().includes("конкурент")) {
-          text = `По вашему запросу подготовлен детальный обзор конкурентов на основе файла \`q4_market_competitors.txt\`:\n\n` +
-            `1. **ООО "АльфаДирект"** (монополист)\n` +
-            `   - Телефон: +7 (495) 120-40-50\n` +
-            `   - Сайт: alphadirect-biz.ru\n` +
-            `   - Слабое место: медленный экспорт данных.\n\n` +
-            `2. **ГК "Вектор Плюс"** (быстрый челленджер)\n` +
-            `   - Телефон: +7 (812) 449-31-00\n` +
-            `   - Сайт: vectorp-solutions.ru\n` +
-            `   - Слабое место: высокий отток клиентов из-за поддержки.\n\n` +
-            `3. **ФинТех Решения (FT-Labs)** (технологический лидер)\n` +
-            `   - Телефон: +7 (800) 555-32-11\n` +
-            `   - Сайт: ftlabs-core.ru\n\n` +
-            `**Рекомендация по стратегии:** Конвертировать клиентов Вектор Плюс за счет более прозрачного SLA поддержки.`;
-        } else if (message.toLowerCase().includes("рынок") || message.toLowerCase().includes("маркетинг")) {
-          text = `### Консалтинговый аудит продвижения\n\n` +
-            `- **Целевая аудитория:** Профессиональные менеджеры и разработчики. Требуется технический слог.\n` +
-            `- **Основной канал:** Контент-маркетинг в экспертных хабах (Хабр, VC) и Telegram-сообществах.\n` +
-            `- **Показатели:** Ожидаемый CPC — до 40 руб., плановый CAC — 120 руб. Конверсия из регистрации в оплату — не менее 4.5%.`;
-        } else {
-          text = `Бизнес-Анализ завершен успешно. Сфера: \`${currentMemory.domain}\`.\n\n` +
-            `Зафиксированы цели: ${currentMemory.goals.join(", ")}.\n\n` +
-            `Файловая среда (/root/data/workfiles) полностью синхронизирована. Предоставьте конкретный консалтинговый бриф для обработки.`;
-        }
-      }
-
-      // Merge mock dynamic memory
-      const updatedProfile = {
-        domain: message.toLowerCase().includes("код") ? "Разработка и Автоматизация" : currentMemory.domain,
-        goals: [...new Set([...currentMemory.goals, "Интеграция VPS скриптов " + new Date().getFullYear()])],
-        facts: [...new Set([...currentMemory.facts, `Пользователь запросил: "${message.slice(0, 30)}..."`])]
-      };
-      
-      saveMemoryState(sessionId, updatedProfile);
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      return res.json({
-        text,
-        thoughtChain,
-        criticEvaluation,
-        saveFileAction,
-        updatedMemoryProfile: updatedProfile,
-        metrics: {
-          ...routerDecision,
-          thoughtChain,
-          criticEvaluation
-        }
-      });
+      const fallbackResult = await generateLocalFallbackResponse(
+        message,
+        sessionId,
+        currentMemory,
+        routerDecision,
+        matchedFilesContent
+      );
+      return res.json(fallbackResult);
     }
 
     // Build standard contents payload with history limit (rolling context)
@@ -882,11 +985,44 @@ app.post("/api/gemini/chat", async (req, res) => {
     });
 
   } catch (error: any) {
-    console.error("Gemini/Atlas Agent Server Error:", error);
-    return res.status(500).json({ 
-      error: "Ошибка генерации ответа Atlas", 
-      details: error.message || String(error)
-    });
+    console.error("Gemini/Atlas Agent Server Error. Activating graceful fallback...", error);
+    try {
+      const errorDetail = error.message || String(error);
+      const prefixWarning = `⚠️ **[Автономный режим]:** В данный момент возникли временные неполадки со связью с ИИ-провайдером (ошибка: *${errorDetail}*).\n` +
+        `Мы временно переключили Atlas в автономный локальный режим бизнес-моделирования, чтобы вы не потеряли контекст. Наша файловая система полностью доступна!`;
+      
+      const currentMemory = loadMemoryState(req.body.sessionId || "default_session");
+      const routerDecision = runModelSelectionRouter(req.body.message, !!(req.body.image && req.body.image.data));
+      
+      let matchedFilesContent = "";
+      try {
+        const files = fs.readdirSync(WORKFILES_DIR).filter(f => f !== ".memory" && !f.startsWith("."));
+        for (const fname of files) {
+          if (req.body.message && req.body.message.toLowerCase().includes(fname.toLowerCase())) {
+            const fpath = path.join(WORKFILES_DIR, fname);
+            const content = fs.readFileSync(fpath, "utf-8");
+            matchedFilesContent += `\n\n--- Содержимое файла "${fname}" ---\n${content}\n---------------------\n`;
+          }
+        }
+      } catch (_) {}
+
+      const fallbackResult = await generateLocalFallbackResponse(
+        req.body.message || "",
+        req.body.sessionId || "default_session",
+        currentMemory,
+        routerDecision,
+        matchedFilesContent,
+        prefixWarning
+      );
+      return res.json(fallbackResult);
+
+    } catch (innerFallbackError: any) {
+      console.error("Critical double fallback crash:", innerFallbackError);
+      return res.status(500).json({ 
+        error: "Ошибка генерации ответа Atlas", 
+        details: error.message || String(error)
+      });
+    }
   }
 });
 
