@@ -709,7 +709,15 @@ app.post("/api/gemini/chat", async (req, res) => {
     // Load the persistent Memory Index for this session
     const currentMemory = loadMemoryState(sessionId);
 
-    // 2. AGENT 2 & 3: Main Agent Solver Prompt + Critic Auditor prompt
+    // 2. Local Model Mocking (No external APIs or Google API keys used)
+    const fallbackResult = await generateLocalFallbackResponse(
+      message,
+      sessionId,
+      currentMemory,
+      routerDecision,
+      matchedFilesContent
+    );
+    return res.json(fallbackResult);
     const systemInstruction = 
       `Вы — Atlas, бизнес-консультант и автономный ассистент, запущенный на VPS сервере.\n` +
       `Ваша цель — давать максимально качественную, проверенную, глубинную бизнес-информацию. Без воды, без лишней вежливости, лести и банальных заполнителей.\n\n` +
