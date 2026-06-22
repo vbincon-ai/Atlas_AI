@@ -844,8 +844,8 @@ app.post("/api/gemini/chat", async (req, res) => {
         });
 
       } catch (routerError: any) {
-        console.error("Router AI live request failed context fallback:", routerError);
-        // Fall back dynamically to standard solvers below
+        console.error("Router AI live request failed:", routerError);
+        throw routerError;
       }
     }
 
