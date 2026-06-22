@@ -38,14 +38,22 @@ if (!fs.existsSync(MEMORY_DIR)) {
 }
 
 // PDF Support Fonts with Russian Cyrillic Glyphs (Roboto)
-const REGULAR_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/static/Roboto-Regular.ttf";
-const BOLD_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/static/Roboto-Bold.ttf";
+const REGULAR_FONT_URL = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/roboto/static/Roboto-Regular.ttf";
+const BOLD_FONT_URL = "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/roboto/static/Roboto-Bold.ttf";
 
 const robotoRegularPath = path.join(MEMORY_DIR, "Roboto-Regular.ttf");
 const robotoBoldPath = path.join(MEMORY_DIR, "Roboto-Bold.ttf");
 
 async function downloadFontsIfNeeded() {
   try {
+    // If files are corrupt or empty, delete them
+    if (fs.existsSync(robotoRegularPath) && fs.statSync(robotoRegularPath).size < 1000) {
+      fs.unlinkSync(robotoRegularPath);
+    }
+    if (fs.existsSync(robotoBoldPath) && fs.statSync(robotoBoldPath).size < 1000) {
+      fs.unlinkSync(robotoBoldPath);
+    }
+
     if (!fs.existsSync(robotoRegularPath)) {
       console.log("Loading Roboto-Regular.ttf for Atlas Cyrillic PDF compiled reports...");
       const res = await fetch(REGULAR_FONT_URL);
@@ -786,7 +794,7 @@ app.post("/api/gemini/chat", async (req, res) => {
           content: userContentPayload
         });
 
-        const routerResponse = await fetch("https://routerai.ru/api/v1/chat/completions", {
+        const routerResponse = await fetch("https://api.routerai.ru/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
