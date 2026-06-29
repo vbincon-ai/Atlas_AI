@@ -1,5 +1,5 @@
 import React from "react";
-import { Plus, History, FolderOpen, Settings, BarChart2, X } from "lucide-react";
+import { Plus, History, FolderOpen, Settings, BarChart2 } from "lucide-react";
 import { ChatSession } from "../types";
 
 interface SidebarProps {
@@ -9,7 +9,6 @@ interface SidebarProps {
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewChatClick: () => void;
-  onDeleteSession: (id: string) => void;
 }
 
 export default function Sidebar({
@@ -18,8 +17,7 @@ export default function Sidebar({
   chatSessions,
   activeSessionId,
   onSelectSession,
-  onNewChatClick,
-  onDeleteSession
+  onNewChatClick
  }: SidebarProps) {
   // Extract recent session nodes
   const recentSessions = chatSessions.slice().reverse().slice(0, 6);
@@ -105,37 +103,18 @@ export default function Sidebar({
         <div className="flex flex-col gap-1 max-h-[220px] overflow-y-auto custom-scrollbar">
           {recentSessions.length > 0 ? (
             recentSessions.map((session) => (
-              <div
+              <button
                 key={session.id}
-                className={`group flex items-center justify-between rounded-lg px-2 text-xs transition-all font-medium ${
-                  activeSessionId === session.id
-                    ? "bg-zinc-800 text-white font-bold border-l-2 border-blue-500 shadow-xs"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-850"
+                onClick={() => {
+                  onSelectSession(session.id);
+                  onTabChange("new_chat");
+                }}
+                className={`text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-left truncate transition-all cursor-pointer font-medium ${
+                  activeSessionId === session.id ? "bg-zinc-800 text-white font-bold border-l-2 border-blue-500 shadow-xs" : ""
                 }`}
               >
-                <button
-                  onClick={() => {
-                    onSelectSession(session.id);
-                    onTabChange("new_chat");
-                  }}
-                  className="flex-grow py-1.5 text-left truncate cursor-pointer mr-1"
-                  title={session.title}
-                >
-                  {session.title}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm("Вы уверены, что хотите удалить эту сессию?")) {
-                      onDeleteSession(session.id);
-                    }
-                  }}
-                  className="flex-shrink-0 p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-zinc-700/50 cursor-pointer md:opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Удалить сессию"
-                >
-                  <X size={12} />
-                </button>
-              </div>
+                {session.title}
+              </button>
             ))
           ) : (
             <p className="text-[10px] text-zinc-500 italic px-2.5 py-1">Нет активных диалогов</p>

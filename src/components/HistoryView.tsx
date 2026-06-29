@@ -24,7 +24,7 @@ export default function HistoryView({
         <div>
           <h2 className="text-3xl font-bold font-headline-lg text-slate-900">История диалогов</h2>
           <p className="text-slate-500 text-sm mt-1">
-            Просматривайте и возобновляйте диалоги, проводите аудит прошлых рекомендаций Atlas.
+            Просматривайте и возобновляйте диалоги, проводите аудит прошлых рекомендаций Atlass.
           </p>
         </div>
 
@@ -89,7 +89,7 @@ export default function HistoryView({
           <div className="text-center py-20 bg-white border border-slate-200 rounded-xl">
             <History size={36} className="mx-auto text-slate-300 mb-2.5" />
             <p className="text-slate-500 font-semibold text-sm">История диалогов пуста</p>
-            <p className="text-slate-400 text-xs mt-1">Начните свой первый диалог с Atlas на главной вкладке.</p>
+            <p className="text-slate-400 text-xs mt-1">Начните свой первый диалог с Atlass на главной вкладке.</p>
           </div>
         )}
       </div>

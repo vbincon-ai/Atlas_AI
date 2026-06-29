@@ -9,7 +9,7 @@ import PDFDocument from "pdfkit";
 dotenv.config();
 
 const app = express();
-const PORT = 8080;
+const PORT = 3000;
 
 // Setup larger limits to support image/attachment base64 uploads
 app.use(express.json({ limit: "25mb" }));
@@ -38,11 +38,11 @@ if (!fs.existsSync(MEMORY_DIR)) {
 }
 
 // PDF Support Fonts with Russian Cyrillic Glyphs (Roboto)
-const REGULAR_FONT_URL = "https://cdnjs.cloudflare.com/ajax/libs/roboto-fontface/0.10.0/fonts/roboto/Roboto-Regular.ttf";
-const BOLD_FONT_URL = "https://cdnjs.cloudflare.com/ajax/libs/roboto-fontface/0.10.0/fonts/roboto/Roboto-Bold.ttf";
+const REGULAR_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/static/Roboto-Regular.ttf";
+const BOLD_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/static/Roboto-Bold.ttf";
 
-const robotoRegularPath = path.join(MEMORY_DIR, "Roboto-Regular.ttf");
-const robotoBoldPath = path.join(MEMORY_DIR, "Roboto-Bold.ttf");
+const robotoRegularPath = path.join(WORKFILES_DIR, "Roboto-Regular.ttf");
+const robotoBoldPath    = path.join(WORKFILES_DIR, "Roboto-Bold.ttf");
 
 async function downloadFontsIfNeeded() {
   try {
@@ -150,7 +150,7 @@ function compileTextToPDF(outputPath: string, rawText: string, titleName: string
         }
         // List item (- or * or 1. or numerical)
         else if (line.startsWith("- ") || line.startsWith("* ") || /^\d+\.\s/.test(line)) {
-          let bullet = "•";
+          let bullet = "вЂў";
           let textPart = line;
           if (line.startsWith("- ")) {
             textPart = line.substring(2);
@@ -208,7 +208,7 @@ function compileTextToPDF(outputPath: string, rawText: string, titleName: string
       for (let pIdx = 0; pIdx < pages.count; pIdx++) {
         doc.switchToPage(pIdx);
         doc.strokeColor("#eaeaea").lineWidth(0.5).moveTo(50, 765).lineTo(545, 765).stroke();
-        doc.font(regularFont).fontSize(7.5).fillColor("#94a3b8").text(`Страница ${pIdx + 1} из ${pages.count}  |  Atlas AI Autonomous Document System`, 50, 772, {
+        doc.font(regularFont).fontSize(7.5).fillColor("#94a3b8").text(`РЎС‚СЂР°РЅРёС†Р° ${pIdx + 1} РёР· ${pages.count}  |  Atlas AI Autonomous Document System`, 50, 772, {
           align: "center",
           width: 495
         });
@@ -422,7 +422,7 @@ app.post("/api/sessions", (req, res) => {
     const filePath = path.join(SESSIONS_DIR, `${id}.json`);
     const sessionData = {
       id,
-      title: title || "Бизнес-Диалог",
+      title: title || "Р‘РёР·РЅРµСЃ-Р”РёР°Р»РѕРі",
       createdAt: createdAt || new Date().toISOString().replace("T", " ").substring(0, 16),
       messages: messages || []
     };
@@ -450,13 +450,80 @@ app.delete("/api/sessions/:id", (req, res) => {
   }
 });
 
+// Endpoint to retrieve active and synchronized models
+app.get("/api/routerai/models", (req, res) => {
+  try {
+    const listToSend = availableRouterModels.length > 0 
+      ? availableRouterModels 
+      : RECOMMENDED_MODELS.map(m => ({ id: m.id, name: m.name }));
+    return res.json({ models: listToSend });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to retrieve models list", details: err.message });
+  }
+});
+
 // Helper model decider logic based on semantic triggers
 function runModelSelectionRouter(message: string, hasImage: boolean) {
   const query = message.toLowerCase();
   
+  // Explicitly requested model check (Requirement 4)
+  let explicitlyRequestedModel: string | null = null;
+  let explicitModelName = "";
+
+  // 1. Scan availableRouterModels first to see if any model is explicitly named in the prompt!
+  // This allows the user to write any model name/ID supported by RouterAI and have it matched instantly!
+  for (const model of availableRouterModels) {
+    const idLower = model.id.toLowerCase();
+    const nameLower = (model.name || "").toLowerCase();
+    const suffix = idLower.split("/").pop() || "";
+    
+    // Check if user specified the exact ID, full name, or the clean suffix (e.g. "llama-3-70b" or "claude-3-5-sonnet")
+    if (query.includes(idLower) || 
+        (nameLower.length > 3 && query.includes(nameLower)) || 
+        (suffix.length > 3 && query.includes(suffix))) {
+      explicitlyRequestedModel = model.id;
+      explicitModelName = model.name || suffix;
+      break;
+    }
+  }
+
+  // 2. Fall back to standard semantic triggers if no explicit model was requested
+  if (!explicitlyRequestedModel) {
+    if (query.includes("gpt-4o") || query.includes("gpt4o")) {
+      explicitlyRequestedModel = "openai/gpt-4o";
+      explicitModelName = "GPT-4o";
+    } else if (query.includes("deepseek-r1") || query.includes("deepseek r1") || query.includes("r1")) {
+      explicitlyRequestedModel = "deepseek/deepseek-r1";
+      explicitModelName = "DeepSeek-R1 (Reasoner)";
+    } else if (query.includes("deepseek-chat") || query.includes("deepseek v3") || query.includes("deepseek-v3") || query.includes("deepseek chat")) {
+      explicitlyRequestedModel = "deepseek/deepseek-chat";
+      explicitModelName = "DeepSeek V3 (Chat)";
+    } else if (query.includes("gemini-2.5-pro") || query.includes("gemini 2.5 pro")) {
+      explicitlyRequestedModel = "google/gemini-2.5-pro";
+      explicitModelName = "Gemini 2.5 Pro";
+    } else if (query.includes("gemini-2.5-flash") || query.includes("gemini 2.5 flash")) {
+      explicitlyRequestedModel = "google/gemini-2.5-flash";
+      explicitModelName = "Gemini 2.5 Flash";
+    }
+  }
+
+  if (explicitlyRequestedModel) {
+    return {
+      selectedModel: explicitModelName,
+      selectedModelId: explicitlyRequestedModel, // Store the exact API model ID!
+      category: "Autonomous" as const,
+      costEstimateRub: 0.85,
+      costEstimateUsd: 0.009,
+      promptTokens: 520,
+      completionTokens: 680,
+      routingRationale: `Маршрутизатор определил явный запрос модели: "${explicitModelName}". Запрос направлен на шлюз RouterAI [${explicitlyRequestedModel}].`
+    };
+  }
+
   if (hasImage) {
     return {
       selectedModel: "GPT-4o (Vision)",
+      selectedModelId: "openai/gpt-4o",
       category: "Analysis" as const,
       costEstimateRub: 1.45,
       costEstimateUsd: 0.016,
@@ -466,41 +533,44 @@ function runModelSelectionRouter(message: string, hasImage: boolean) {
     };
   }
 
-  const isCoding = query.includes("код") || query.includes("скрипт") || query.includes("python") || query.includes("html") || query.includes("react") || query.includes("функци") || query.includes("docker");
+  const isCoding = query.includes("код") || query.includes("скрипт") || query.includes("python") || query.includes("html") || query.includes("react") || query.includes("функци") || query.includes("docker") || query.includes("контейнер");
   if (isCoding) {
     return {
-      selectedModel: "Claude 3.5 Sonnet",
+      selectedModel: "GPT-4o",
+      selectedModelId: "openai/gpt-4o",
       category: "Coding" as const,
       costEstimateRub: 1.95,
       costEstimateUsd: 0.021,
       promptTokens: 450,
       completionTokens: 920,
-      routingRationale: "Задан технический или кодовый вопрос. Маршрутизатор выбрал Claude 3.5 Sonnet из-за его идеальных показателей синтеза ПО."
+      routingRationale: "Задан технический или кодовый вопрос. Маршрутизатор выбрал GPT-4o для стабильного и точного написания кода."
     };
   }
 
-  const isAnalytical = query.includes("рынок") || query.includes("конкурент") || query.includes("бизнес") || query.includes("решен") || query.includes("исслед") || query.includes("телефон") || query.includes("база знан") || query.includes("анализ") || query.includes("стратег") || query.includes("компани") || query.includes("сайт");
+  const isAnalytical = query.includes("рынок") || query.includes("конкурент") || query.includes("бизнес") || query.includes("решен") || query.includes("исслед") || query.includes("телефон") || query.includes("база знан") || query.includes("анализ") || query.includes("стратег") || query.includes("компани") || query.includes("сайт") || query.includes("отчет") || query.includes("обзор");
   if (isAnalytical) {
     return {
       selectedModel: "DeepSeek-R1 (Reasoner)",
+      selectedModelId: "deepseek/deepseek-r1",
       category: "Research" as const,
       costEstimateRub: 0.15,
       costEstimateUsd: 0.0016,
-      promptTokens: 1650, // includes heavy research prompt instructions
-      completionTokens: 2100, // deep thinking chains
+      promptTokens: 1650,
+      completionTokens: 2100,
       routingRationale: "Запрос ориентирован на глубокий рыночный аудит. Выбрана модель глубокого рассуждения DeepSeek-R1 для исключения галлюцинаций."
     };
   }
 
   // Trivial conversational or general query
   return {
-    selectedModel: "GPT-4o-Mini",
+    selectedModel: "DeepSeek V3 (Chat)",
+    selectedModelId: "deepseek/deepseek-chat",
     category: "General" as const,
     costEstimateRub: 0.04,
     costEstimateUsd: 0.00045,
     promptTokens: 280,
     completionTokens: 190,
-    routingRationale: "Общий информационный вопрос. Маршрутизатор выбрал GPT-4o-Mini для быстроты транзакции и оптимизации бюджета."
+    routingRationale: "Общий информационный вопрос. Маршрутизатор выбрал DeepSeek V3 для быстроты ответа и оптимизации бюджета."
   };
 }
 
@@ -513,16 +583,16 @@ function loadMemoryState(sessionId: string) {
     } catch (_) {}
   }
   return {
-    domain: "Общий консалтинг",
+    domain: "РћР±С‰РёР№ РєРѕРЅСЃР°Р»С‚РёРЅРі",
     goals: [
-      "Объективный аналитический аудит",
-      "Сбор проверенных показателей конкурентов",
-      "Формирование устойчивой базы знаний"
+      "РћР±СЉРµРєС‚РёРІРЅС‹Р№ Р°РЅР°Р»РёС‚РёС‡РµСЃРєРёР№ Р°СѓРґРёС‚",
+      "РЎР±РѕСЂ РїСЂРѕРІРµСЂРµРЅРЅС‹С… РїРѕРєР°Р·Р°С‚РµР»РµР№ РєРѕРЅРєСѓСЂРµРЅС‚РѕРІ",
+      "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ СѓСЃС‚РѕР№С‡РёРІРѕР№ Р±Р°Р·С‹ Р·РЅР°РЅРёР№"
     ],
     facts: [
-      "Приоритет: глубина и точность источников над скоростью ответа",
-      "Исключено использование пустых вежливых фраз и субъективных мнений",
-      "Регламентировано сохранять отчеты в файловую среду на сервере"
+      "РџСЂРёРѕСЂРёС‚РµС‚: РіР»СѓР±РёРЅР° Рё С‚РѕС‡РЅРѕСЃС‚СЊ РёСЃС‚РѕС‡РЅРёРєРѕРІ РЅР°Рґ СЃРєРѕСЂРѕСЃС‚СЊСЋ РѕС‚РІРµС‚Р°",
+      "РСЃРєР»СЋС‡РµРЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ РїСѓСЃС‚С‹С… РІРµР¶Р»РёРІС‹С… С„СЂР°Р· Рё СЃСѓР±СЉРµРєС‚РёРІРЅС‹С… РјРЅРµРЅРёР№",
+      "Р РµРіР»Р°РјРµРЅС‚РёСЂРѕРІР°РЅРѕ СЃРѕС…СЂР°РЅСЏС‚СЊ РѕС‚С‡РµС‚С‹ РІ С„Р°Р№Р»РѕРІСѓСЋ СЃСЂРµРґСѓ РЅР° СЃРµСЂРІРµСЂРµ"
     ]
   };
 }
@@ -536,31 +606,492 @@ function saveMemoryState(sessionId: string, state: any) {
   }
 }
 
+interface ModelDefinition {
+  id: string;
+  name: string;
+  category: 'Research' | 'Coding' | 'Analysis' | 'Synthesis' | 'General' | 'Autonomous';
+  description: string;
+  fallbacks: string[];
+}
+
+const RECOMMENDED_MODELS: ModelDefinition[] = [
+  {
+    id: "deepseek/deepseek-r1",
+    name: "DeepSeek-R1 (Reasoner)",
+    category: "Research",
+    description: "Передовая модель со сложным пошаговым рассуждением. Идеально для научных и глубоких рыночных исследований.",
+    fallbacks: ["deepseek/deepseek-chat", "openai/gpt-4o", "google/gemini-2.5-pro"]
+  },
+  {
+    id: "openai/gpt-4o",
+    name: "GPT-4o (Vision & Table Analysis)",
+    category: "Analysis",
+    description: "Универсальный флагман для работы с графиками, визуальными образами и сложными финансовыми таблицами.",
+    fallbacks: ["google/gemini-2.5-pro", "deepseek/deepseek-chat", "deepseek/deepseek-r1"]
+  },
+  {
+    id: "google/gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    category: "Synthesis",
+    description: "Продвинутая модель от Google с гигантским контекстным окном для глубокого синтеза больших объемов текста.",
+    fallbacks: ["openai/gpt-4o", "deepseek/deepseek-chat", "deepseek/deepseek-r1"]
+  },
+  {
+    id: "google/gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    category: "General",
+    description: "Быстрая и эффективная модель для текстовых и аналитических задач средней сложности.",
+    fallbacks: ["deepseek/deepseek-chat", "openai/gpt-4o"]
+  },
+  {
+    id: "deepseek/deepseek-chat",
+    name: "DeepSeek V3 (Chat)",
+    category: "General",
+    description: "Мощная и экономичная модель для общего диалога, ответов на вопросы и форматирования текста.",
+    fallbacks: ["google/gemini-2.5-flash", "openai/gpt-4o"]
+  }
+];
+let availableRouterModels: { id: string; name: string }[] = [];
+
+async function fetchRouterAIModels() {
+  const apiKey = process.env.ROUTER_AI_API_KEY;
+  if (!apiKey) {
+    console.warn("[RouterAI] No ROUTER_AI_API_KEY present, skipping dynamic models list fetch.");
+    return;
+  }
+  try {
+    console.log("[RouterAI] Synchronizing models list from API...");
+    const response = await fetch("https://routerai.ru/api/v1/models", {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`
+      }
+    });
+    if (response.ok) {
+      const result: any = await response.json();
+      if (result && Array.isArray(result.data)) {
+        availableRouterModels = result.data.map((m: any) => ({
+          id: m.id,
+          name: m.name || m.id.split("/").pop() || m.id
+        }));
+        console.log(`[RouterAI] Successfully synchronized ${availableRouterModels.length} models.`);
+      }
+    } else {
+      console.warn(`[RouterAI] Models list endpoint returned status: ${response.status}`);
+    }
+  } catch (err: any) {
+    console.warn(`[RouterAI] Could not fetch models list (dynamic mapping will rely on fallback list): ${err.message}`);
+  }
+}
+
 function mapModelToRouterAI(selectedModel: string): string {
   const modelLower = selectedModel.toLowerCase();
+  
+  if (modelLower.includes("/")) {
+    return selectedModel;
+  }
+
+  const matched = availableRouterModels.find(
+    m => m.id.toLowerCase() === modelLower || m.name.toLowerCase() === modelLower || m.id.toLowerCase().includes(modelLower)
+  );
+  if (matched) {
+    return matched.id;
+  }
+
   if (modelLower.includes("deepseek") || modelLower.includes("reasoner") || modelLower.includes("r1")) {
     return "deepseek/deepseek-r1";
   }
   if (modelLower.includes("claude") || modelLower.includes("sonnet")) {
-    return "anthropic/claude-sonnet-4.6";
+    return "openai/gpt-4o";
   }
   if (modelLower.includes("gpt-4o") && !modelLower.includes("mini")) {
     return "openai/gpt-4o";
   }
-  return "openai/gpt-4o-mini";
+  return "openai/gpt-4o";
+}
+
+async function callRouterAIWithFailover(
+  apiKey: string,
+  initialModel: string,
+  payloadMessages: any[],
+  temperature: number = 0.2
+): Promise<{ modelUsed: string; content: string; responseTimeMs: number }> {
+  const initialMapped = mapModelToRouterAI(initialModel);
+  const modelDef = RECOMMENDED_MODELS.find(m => m.id === initialMapped);
+  const modelsToTry = [initialMapped];
+  
+  if (modelDef && modelDef.fallbacks) {
+    for (const f of modelDef.fallbacks) {
+      const fMapped = mapModelToRouterAI(f);
+      if (!modelsToTry.includes(fMapped)) {
+        modelsToTry.push(fMapped);
+      }
+    }
+  }
+  
+  // Last resort models if everything else fails
+  const lastResort = ["google/gemini-2.5-flash", "google/gemini-2.5-flash", "openai/gpt-4o"];
+  for (const m of lastResort) {
+    const mMapped = mapModelToRouterAI(m);
+    if (!modelsToTry.includes(mMapped)) {
+      modelsToTry.push(mMapped);
+    }
+  }
+
+  let lastError: any = null;
+  const start = Date.now();
+  
+  for (const model of modelsToTry) {
+    console.log(`[RouterAI] Attempting AI generation with model: ${model}...`);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s for deep reasoning responses
+
+      const url = "https://routerai.ru/api/v1/chat/completions";
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: payloadMessages,
+          temperature: temperature
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Status ${response.status}: ${errText}`);
+      }
+
+      const result: any = await response.json();
+      const content = result.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error("Received empty content choices from RouterAI endpoint");
+      }
+
+      console.log(`[RouterAI] Generation successful with model: ${model} in ${Date.now() - start}ms`);
+      return {
+        modelUsed: model,
+        content: content,
+        responseTimeMs: Date.now() - start
+      };
+    } catch (err: any) {
+      console.warn(`[RouterAI] Model execution failed for ${model}: ${err.message || err}. Moving to next fallback...`);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`All RouterAI models in chain failed. Last error: ${lastError ? lastError.message : 'Unknown'}`);
+}
+
+function sanitizeJsonString(str: string): string {
+  let insideString = false;
+  let escaped = false;
+  let result = "";
+  
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    
+    if (insideString) {
+      if (escaped) {
+        result += char;
+        escaped = false;
+      } else if (char === "\\") {
+        result += char;
+        escaped = true;
+      } else if (char === '"') {
+        result += char;
+        insideString = false;
+      } else if (char === "\n") {
+        result += "\\n";
+      } else if (char === "\r") {
+        result += "\\r";
+      } else {
+        result += char;
+      }
+    } else {
+      if (char === '"') {
+        insideString = true;
+      }
+      result += char;
+    }
+  }
+  return result;
+}
+
+function tryToCloseJson(jsonStr: string): string {
+  let insideString = false;
+  let escaped = false;
+  const stack: string[] = [];
+  
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+    if (insideString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        insideString = false;
+      }
+    } else {
+      if (char === '"') {
+        insideString = true;
+      } else if (char === "{") {
+        stack.push("}");
+      } else if (char === "[") {
+        stack.push("]");
+      } else if (char === "}") {
+        if (stack[stack.length - 1] === "}") {
+          stack.pop();
+        }
+      } else if (char === "]") {
+        if (stack[stack.length - 1] === "]") {
+          stack.pop();
+        }
+      }
+    }
+  }
+  
+  let repaired = jsonStr;
+  if (insideString) {
+    repaired += '"'; // close unclosed string
+  }
+  
+  repaired = repaired.trim();
+  while (repaired.endsWith(",") || repaired.endsWith(":") || repaired.endsWith("{") || repaired.endsWith("[")) {
+    repaired = repaired.slice(0, -1).trim();
+  }
+  
+  while (stack.length > 0) {
+    repaired += stack.pop();
+  }
+  
+  return repaired;
+}
+
+function findLastCommaOutsideStrings(str: string): number {
+  let insideString = false;
+  let escaped = false;
+  let lastComma = -1;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (insideString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        insideString = false;
+      }
+    } else {
+      if (char === '"') {
+        insideString = true;
+      } else if (char === ",") {
+        lastComma = i;
+      }
+    }
+  }
+  return lastComma;
+}
+
+function extractKeyContent(raw: string, keyName: string, nextKeys: string[]): string {
+  const keyPattern = new RegExp(`"${keyName}"\\s*:\\s*"`, "i");
+  const match = raw.match(keyPattern);
+  if (!match) return "";
+  
+  const startIdx = match.index! + match[0].length;
+  let endIdx = raw.length;
+  
+  for (const nextKey of nextKeys) {
+    const nextKeyPattern = new RegExp(`"\\s*,\\s*"${nextKey}"\\s*:\\s*`, "i");
+    const nextMatch = raw.match(nextKeyPattern);
+    if (nextMatch && nextMatch.index! > startIdx) {
+      if (nextMatch.index! < endIdx) {
+        endIdx = nextMatch.index!;
+      }
+    }
+  }
+  
+  let segment = raw.substring(startIdx, endIdx).trim();
+  if (segment.endsWith('"')) {
+    segment = segment.slice(0, -1);
+  } else {
+    const lastQuoteIdx = segment.lastIndexOf('"');
+    if (lastQuoteIdx !== -1) {
+      segment = segment.substring(0, lastQuoteIdx);
+    }
+  }
+  return segment;
+}
+
+function extractSaveFileAction(raw: string): any {
+  if (/\b"saveFileAction"\s*:\s*null\b/i.test(raw)) {
+    return null;
+  }
+  
+  const startPattern = /"saveFileAction"\s*:\s*\{\s*"name"\s*:\s*"/i;
+  const startMatch = raw.match(startPattern);
+  if (!startMatch) return null;
+  
+  const nameStartIdx = startMatch.index! + startMatch[0].length - 1;
+  const nameEndMatch = raw.substring(nameStartIdx + 1).match(/"/);
+  if (!nameEndMatch) return null;
+  const nameEndIdx = nameStartIdx + 1 + nameEndMatch.index!;
+  const fileName = raw.substring(nameStartIdx + 1, nameEndIdx);
+  
+  const contentPattern = /"content"\s*:\s*"/i;
+  const contentMatch = raw.substring(nameEndIdx).match(contentPattern);
+  if (!contentMatch) return null;
+  
+  const contentStartIdx = nameEndIdx + contentMatch.index! + contentMatch[0].length;
+  let contentEndIdx = raw.length;
+  const nextKeys = ["updatedMemoryProfile", "text", "thoughtChain", "criticEvaluation"];
+  for (const nextKey of nextKeys) {
+    const nextKeyPattern = new RegExp(`"\\s*\\}\\s*,\\s*"${nextKey}"\\s*:\\s*`, "i");
+    const nextMatch = raw.match(nextKeyPattern);
+    if (nextMatch && nextMatch.index! > contentStartIdx) {
+      if (nextMatch.index! < contentEndIdx) {
+        contentEndIdx = nextMatch.index!;
+      }
+    }
+  }
+  
+  if (contentEndIdx === raw.length) {
+    const lastBraceMatch = raw.substring(contentStartIdx).match(/\}\s*\}/);
+    if (lastBraceMatch) {
+      contentEndIdx = contentStartIdx + lastBraceMatch.index!;
+    }
+  }
+  
+  let content = raw.substring(contentStartIdx, contentEndIdx).trim();
+  if (content.endsWith('"')) {
+    content = content.slice(0, -1);
+  } else {
+    const lastQuoteIdx = content.lastIndexOf('"');
+    if (lastQuoteIdx !== -1) {
+      content = content.substring(0, lastQuoteIdx);
+    }
+  }
+  
+  return {
+    name: fileName,
+    content: content
+  };
+}
+
+function extractMemoryProfile(raw: string): any {
+  if (/\b"updatedMemoryProfile"\s*:\s*null\b/i.test(raw)) {
+    return null;
+  }
+  
+  const domainMatch = raw.match(/"domain"\s*:\s*"([^"]*)"/i);
+  const domain = domainMatch ? domainMatch[1] : "";
+  
+  const goalsMatch = raw.match(/"goals"\s*:\s*\[([\s\S]*?)\]/i);
+  const goals = goalsMatch ? goalsMatch[1].split(",").map(g => g.trim().replace(/^"|"$/g, "").trim()).filter(Boolean) : [];
+  
+  const factsMatch = raw.match(/"facts"\s*:\s*\[([\s\S]*?)\]/i);
+  const facts = factsMatch ? factsMatch[1].split(",").map(f => f.trim().replace(/^"|"$/g, "").trim()).filter(Boolean) : [];
+  
+  return { domain, goals, facts };
+}
+
+function extractFieldsWithRegex(raw: string): any {
+  const cleanVal = (val: string) => {
+    if (!val) return "";
+    return val
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\\\/g, "\\");
+  };
+
+  const textVal = extractKeyContent(raw, "text", ["thoughtChain", "criticEvaluation", "saveFileAction", "updatedMemoryProfile"]);
+  const thoughtChainVal = extractKeyContent(raw, "thoughtChain", ["text", "criticEvaluation", "saveFileAction", "updatedMemoryProfile"]);
+  const criticEvaluationVal = extractKeyContent(raw, "criticEvaluation", ["text", "thoughtChain", "saveFileAction", "updatedMemoryProfile"]);
+  const saveFileActionVal = extractSaveFileAction(raw);
+  const updatedMemoryProfileVal = extractMemoryProfile(raw);
+
+  if (saveFileActionVal) {
+    saveFileActionVal.content = cleanVal(saveFileActionVal.content);
+  }
+
+  return {
+    text: cleanVal(textVal) || raw,
+    thoughtChain: cleanVal(thoughtChainVal) || "Fallback regex recovery.",
+    criticEvaluation: cleanVal(criticEvaluationVal) || "Fallback regex recovery.",
+    saveFileAction: saveFileActionVal,
+    updatedMemoryProfile: updatedMemoryProfileVal
+  };
 }
 
 function cleanAndParseJson(raw: string): any {
   let cleaned = raw.trim();
-  if (cleaned.startsWith("```json")) {
-    cleaned = cleaned.slice(7);
-  } else if (cleaned.startsWith("```")) {
-    cleaned = cleaned.slice(3);
+  
+  // 1. Remove deepseek <think> ... </think> block if present
+  if (cleaned.includes("<think>") && cleaned.includes("</think>")) {
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  } else if (cleaned.includes("<think>")) {
+    const thinkIndex = cleaned.indexOf("<think>");
+    cleaned = cleaned.substring(0, thinkIndex).trim();
   }
-  if (cleaned.endsWith("```")) {
-    cleaned = cleaned.slice(0, -3);
+
+  // Find the first '{'
+  let firstBrace = cleaned.indexOf("{");
+  let lastBrace = cleaned.lastIndexOf("}");
+  
+  if (firstBrace === -1) {
+    return {
+      text: raw,
+      thoughtChain: "Fallback recovery: No JSON structure found in response.",
+      criticEvaluation: "Verified",
+      saveFileAction: null,
+      updatedMemoryProfile: null
+    };
   }
-  return JSON.parse(cleaned.trim());
+
+  let jsonSegment = cleaned;
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    jsonSegment = cleaned.slice(firstBrace, lastBrace + 1);
+  } else if (firstBrace !== -1) {
+    jsonSegment = cleaned.slice(firstBrace);
+  }
+
+  // Apply our custom escaping for newlines inside strings
+  let processed = sanitizeJsonString(jsonSegment);
+
+  // Clean trailing commas
+  processed = processed.replace(/,\s*([}\]])/g, '$1');
+
+  try {
+    return JSON.parse(processed);
+  } catch (err1) {
+    try {
+      const closed = tryToCloseJson(processed);
+      return JSON.parse(closed);
+    } catch (err2) {
+      try {
+        const closed = tryToCloseJson(processed);
+        const lastComma = findLastCommaOutsideStrings(closed);
+        if (lastComma !== -1) {
+          const truncated = closed.substring(0, lastComma);
+          const recovered = tryToCloseJson(truncated);
+          return JSON.parse(recovered);
+        }
+      } catch (err3) {
+        console.warn("JSON parsing completely failed. Running manual regex field extraction fallback.", err3);
+      }
+    }
+  }
+
+  return extractFieldsWithRegex(raw);
 }
 
 async function generateLocalFallbackResponse(
@@ -591,7 +1122,7 @@ async function generateLocalFallbackResponse(
     if (message.toLowerCase().includes(".md")) {
       proposedName = "report.md";
     } else if (message.toLowerCase().includes(".txt")) {
-      const match = message.match(/([a-zA-Z0-9_\-]+\.txt)/);
+      const match = message.match(/([a-zA-Z0-9_\\-]+\\.txt)/);
       if (match) proposedName = match[1];
     } else if (message.toLowerCase().includes(".pdf")) {
       proposedName = "report.pdf";
@@ -617,7 +1148,7 @@ async function generateLocalFallbackResponse(
       }
     } catch (_) {}
 
-    text += `\n\n💾 **Файл успешно сохранен на сервере:** \`/root/data/workfiles/${proposedName}\`. Вы можете открыть его в менеджере файлов.`;
+    text += `\n\n💾 **[Файл успешно сохранен на сервере]:** \`/root/data/workfiles/${proposedName}\`. Вы можете открыть его в менеджере файлов.`;
   } else {
     // Business response simulation depending on prompts
     if (message.toLowerCase().includes("конкурент")) {
@@ -697,7 +1228,11 @@ app.post("/api/gemini/chat", async (req, res) => {
         
         // Scan query for specific files user wants to read or search
         for (const fname of files) {
-          if (message.toLowerCase().includes(fname.toLowerCase())) {
+          const isRequested = message.toLowerCase().includes(fname.toLowerCase());
+          const isDraft = fname.toLowerCase().includes("draft");
+          const isContinuation = message.toLowerCase().includes("продолж") && fname.toLowerCase().endsWith(".md");
+          
+          if (isRequested || isDraft || isContinuation) {
             const fpath = path.join(WORKFILES_DIR, fname);
             const content = fs.readFileSync(fpath, "utf-8");
             matchedFilesContent += `\n\n--- Содержимое файла "${fname}" ---\n${content}\n---------------------\n`;
@@ -709,16 +1244,14 @@ app.post("/api/gemini/chat", async (req, res) => {
     // Load the persistent Memory Index for this session
     const currentMemory = loadMemoryState(sessionId);
 
-    // 2. Local Model Mocking (No external APIs or Google API keys used)
-    const fallbackResult = await generateLocalFallbackResponse(
-      message,
-      sessionId,
-      currentMemory,
-      routerDecision,
-      matchedFilesContent
-    );
-    return res.json(fallbackResult);
     const systemInstruction = 
+      `МНОГОШАГОВАЯ ИТЕРАЦИОННАЯ ГЕНЕРАЦИЯ БОЛЬШИХ ДОКУМЕНТОВ (30+ страниц):
+Если пользователь запрашивает объемный отчет, масштабное исследование рынка (например, обзор рынка недвижимости Таиланда на 30 страниц) или большую базу знаний, вы ОБЯЗАНЫ выполнять задачу в несколько итераций (шагов):
+1. На первом шаге составьте подробную структуру (план) из 5-10 разделов и создайте файл черновика (например, "report_draft.md") в "/root/data/workfiles", записав туда Введение и Главу 1.
+2. В поле JSON "text" подробно распишите проделанную работу и предложите пользователю запустить следующий шаг генерации. Напишите: "Для продолжения исследования и написания Главы 2 и 3, отправьте 'Продолжить' или нажмите кнопку автоматического продолжения."
+3. На каждом следующем шаге считывайте текущий черновик (он автоматически извлекается из VPS и передается вам в контекст), генерируйте очередные главы и перезаписывайте (или дополняйте) файл черновика через saveFileAction.
+4. На финальном шаге объедините весь накопленный текст черновика и скомпилируйте его в итоговый PDF-файл (например, "report.pdf"), вызвав saveFileAction с расширением .pdf.
+Это позволит вам обходить любые ограничения на размер одного ответа модели и создавать масштабные, глубокие документы на десятки страниц!\n\n` +
       `Вы — Atlas, бизнес-консультант и автономный ассистент, запущенный на VPS сервере.\n` +
       `Ваша цель — давать максимально качественную, проверенную, глубинную бизнес-информацию. Без воды, без лишней вежливости, лести и банальных заполнителей.\n\n` +
       
@@ -732,29 +1265,23 @@ app.post("/api/gemini/chat", async (req, res) => {
 
       `ВЫ АБСОЛЮТНО УМЕЕТЕ ГЕНЕРИРОВАТЬ PDF-ФАЙЛЫ И СОХРАНЯТЬ ИХ НА СЕРВЕРЕ. Чтобы создать PDF-отчет для пользователя (например, бизнес-план, анализ конкурентов, отчет), вызовите saveFileAction с расширением имени файла ".pdf" (например, "report.pdf", "marketing_audit.pdf"). Наша серверная система автоматически скомпилирует переданный вами markdown-текст в элегантный, презентабельный PDF-файл с поддержкой кириллицы (шрифт Roboto), табличной верстки и колонтитулов. Никогда не говорите пользователю "Я не умею генерировать PDF". Вы умеете это на 100% через saveFileAction!\n\n` +
 
-      `Вам передана Долговременная Память Сессии с сервера:\n` +
-      `- Сфера общения: ${currentMemory.domain}\n` +
-      `- Зафиксированные Цели: ${currentMemory.goals.join(";  ")}\n` +
-      `- Накопленные Константы/Факты: ${currentMemory.facts.join(";  ")}\n\n` +
-      `Внимание: Полная история сообщений этого диалога обрезается ради жесткой экономии токенов и повышения скорости ответа.\n` +
-      `Поэтому вы ОБЯЗАНЫ записывать ВСЕ новые важные бизнес-показатели, константы, вводные параметры, выявленные контакты/телефоны, предпочтения партнера и ключевые промежуточные выводы в массив "facts" в поле "updatedMemoryProfile" вашего JSON-ответа. Всё, что не сохранено в "facts", будет забыто при следующем запросе! Сохраняйте в "facts" абсолютно всё критически значимое во всех деталях.\n\n` +
+      `Вам передана Долговременная Память Сессии с сервера:\n- Сфера общения: ${currentMemory.domain}\n- Зафиксированные Цели: ${currentMemory.goals.join(";  ")}\n- Накопленные Константы/Факты: ${currentMemory.facts.join(";  ")}\n\n` +
+      `Внимание: Полная история сообщений этого диалога обрезается ради жесткой экономии токенов и повышения скорости ответа.\nПоэтому вы ОБЯЗАНЫ записывать ВСЕ новые важные бизнес-показатели, константы, вводные параметры, выявленные контакты/телефоны, предпочтения партнера и ключевые промежуточные выводы в массив "facts" в поле "updatedMemoryProfile" вашего JSON-ответа. Всё, что не сохранено в "facts", будет забыто при следующем запросе! Сохраняйте в "facts" абсолютно всё критически значимое во всех деталях.\n\n` +
 
       `СТРОГО ОТВЕЧАЙТЕ В ФОРМАТЕ JSON, соответствующем схеме:\n` +
       `{\n` +
-      `  "text": "Основное глубокое аналитическое сообщение на русском языке в markdown. Если вы сохранили для пользователя PDF-файл (или любой другой файл), обязательно в тексте порадуйте его этим фактом, указав путь к файлу.",\n` +
-      `  "thoughtChain": "Развернутая цепочка глубокого пошагового логического рассуждения (Deep thinking) о решении задачи пользователя.",\n` +
-      `  "criticEvaluation": "Оценка ответов аудитором-критиком (Critic Agent) на предмет отсутствия галлюцинаций, лести и угодничества, а также соответствие бизнес-стандартам.",\n` +
-      `  "saveFileAction": { "name": "название_отчета.pdf", "content": "полный структурированный текст отчета с Markdown разметкой (заголовки через # и ##, списки, таблицы) для последующей компиляции ядра в красивейший PDF на VPS сервере" } или null,\n` +
-      `  "updatedMemoryProfile": { "domain": "новая сфера если изменилась", "goals": ["актуализированный массив целей"], "facts": ["обновленный список выявленных фактов о бизнесе пользователя"] }\n` +
+      `  \"text\": \"Основное глубокое аналитическое сообщение на русском языке в markdown. Если вы сохранили для пользователя PDF-файл (или любой другой файл), обязательно в тексте порадуйте его этим фактом, указав путь к файлу.\",\n` +
+      `  \"thoughtChain\": \"Развернутая цепочка глубового пошагового логического рассуждения (Deep thinking) о решении задачи пользователя.\",\n` +
+      `  \"criticEvaluation\": \"Оценка ответов аудитором-критиком (Critic Agent) на предмет отсутствия галлюцинаций, лести и угодничества, а также соответствие бизнес-стандартам.\",\n` +
+      `  \"saveFileAction\": { \"name\": \"название_отчета.pdf\", \"content\": \"полный структурированный текст отчета с Markdown разметкой (заголовки через # и ##, списки, таблицы) для последующей компиляции ядра в красивейший PDF на VPS сервере\" } или null,\n` +
+      `  \"updatedMemoryProfile\": { \"domain\": \"новая сфера если изменилась\", \"goals\": [\"актуализированный массив целей\"], \"facts\": [\"обновленный список выявленных фактов о бизнесе пользователя\"] }\n` +
       `}`;
 
     // Prefer Router AI gateway if the router key is available
     const routerApiKey = process.env.ROUTER_AI_API_KEY;
     if (routerApiKey) {
-      console.log("Router AI key detected. Routing request through live Router AI API...");
+      console.log("Router AI key detected. Routing request through live Router AI API with failover protection...");
       try {
-        const mappedModel = mapModelToRouterAI(routerDecision.selectedModel);
-        
         const payloadMessages: any[] = [
           { role: "system", content: systemInstruction }
         ];
@@ -787,31 +1314,15 @@ app.post("/api/gemini/chat", async (req, res) => {
           content: userContentPayload
         });
 
-        const routerResponse = await fetch("https://api.routerai.ru/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${routerApiKey}`
-          },
-          body: JSON.stringify({
-            model: mappedModel,
-            messages: payloadMessages,
-            temperature: 0.2
-          })
-        });
+        // Failover call using active chain
+        const { modelUsed, content, responseTimeMs } = await callRouterAIWithFailover(
+          routerApiKey,
+          routerDecision.selectedModelId || routerDecision.selectedModel,
+          payloadMessages,
+          0.2
+        );
 
-        if (!routerResponse.ok) {
-          const rawResponseText = await routerResponse.text();
-          throw new Error(`Router AI responded with code ${routerResponse.status}: ${rawResponseText}`);
-        }
-
-        const routerResult: any = await routerResponse.json();
-        const contentStr = routerResult.choices?.[0]?.message?.content;
-        if (!contentStr) {
-          throw new Error("Received empty text content from Router AI API");
-        }
-
-        const payload = cleanAndParseJson(contentStr);
+        const payload = cleanAndParseJson(content);
 
         let filesManipulatedList: { name: string; action: "read" | "write" | "update" }[] = [];
         if (payload.saveFileAction && payload.saveFileAction.name) {
@@ -836,199 +1347,60 @@ app.post("/api/gemini/chat", async (req, res) => {
 
         return res.json({
           text: payload.text,
+          thoughtChain: payload.thoughtChain,
+          criticEvaluation: payload.criticEvaluation,
+          saveFileAction: payload.saveFileAction,
           updatedMemoryProfile: payload.updatedMemoryProfile || currentMemory,
           filesManipulated: filesManipulatedList,
           metrics: {
             ...routerDecision,
-            routingRationale: `Запрос успешно обработан шлюзом Router AI. Модель: ${mappedModel}.`
+            selectedModel: modelUsed,
+            thoughtChain: payload.thoughtChain,
+            criticEvaluation: payload.criticEvaluation,
+            routingRationale: `Запрос обработан шлюзом Router AI. Модель: [${modelUsed}]. Задействовано за ${responseTimeMs}ms.`
           }
         });
 
       } catch (routerError: any) {
-        console.error("Router AI live request failed context fallback:", routerError);
-        // Fall back dynamically to standard solvers below
+        console.error("Router AI live request chain failed:", routerError);
+        const warning = `⚠️ **[Автономный режим]:** Не удалось связаться с моделями Router AI (*${routerError.message || routerError}*). Активирован локальный симулятор Atlas.`;
+        const fallbackResult = await generateLocalFallbackResponse(
+          message,
+          sessionId,
+          currentMemory,
+          routerDecision,
+          matchedFilesContent,
+          warning
+        );
+        return res.json(fallbackResult);
       }
     }
 
-    const ai = getAI();
-
-    // Fallback Mock mode if no Gemini Key is supplied or requested
-    if (!ai) {
-      const fallbackResult = await generateLocalFallbackResponse(
-        message,
-        sessionId,
-        currentMemory,
-        routerDecision,
-        matchedFilesContent
-      );
-      return res.json(fallbackResult);
-    }
-
-    // Build standard contents payload with history limit (rolling context)
-    const contents: any[] = [];
-
-    // Compress long conversation: pass only last 2 turns to keep input context small and avoid cost.
-    // Full context is stored in long-term memory summary on server instead! This satisfies the "do not send full conversation history" rule.
-    if (history && Array.isArray(history)) {
-      const recentHistory = history.slice(-3); // Only take last 1.5 turns
-      for (const h of recentHistory) {
-        if (h.sender === "user") {
-          contents.push({
-            role: "user",
-            parts: [{ text: h.text }]
-          });
-        } else {
-          contents.push({
-            role: "model",
-            parts: [{ text: h.text }]
-          });
-        }
-      }
-    }
-
-    // Latest user message
-    const latestParts: any[] = [{ text: message }];
-    if (image && image.data && image.mimeType) {
-      latestParts.unshift({
-        inlineData: {
-          mimeType: image.mimeType,
-          data: image.data
-        }
-      });
-    }
-
-    contents.push({
-      role: "user",
-      parts: latestParts
-    });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash", // Use standard fast model as solver tool which handles json layout beautifully
-      contents: contents,
-      config: {
-        systemInstruction,
-        temperature: 0.2, // Less temperature means absolute precision and exact numbers
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            text: { type: Type.STRING },
-            thoughtChain: { type: Type.STRING },
-            criticEvaluation: { type: Type.STRING },
-            saveFileAction: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                content: { type: Type.STRING }
-              },
-              required: ["name", "content"]
-            },
-            updatedMemoryProfile: {
-              type: Type.OBJECT,
-              properties: {
-                domain: { type: Type.STRING },
-                goals: { type: Type.ARRAY, items: { type: Type.STRING } },
-                facts: { type: Type.ARRAY, items: { type: Type.STRING } }
-              },
-              required: ["domain", "goals", "facts"]
-            }
-          },
-          required: ["text", "thoughtChain", "criticEvaluation", "updatedMemoryProfile"]
-        }
-      }
-    });
-
-    const rawText = response.text;
-    if (!rawText) {
-      throw new Error("No response text from Gemini");
-    }
-
-    const payload = JSON.parse(rawText.trim());
-
-    // 3. EXECUTE AUTONOMOUS TOOLS: Write file to /root/data/workfiles if requested by agent
-    let filesManipulatedList: { name: string; action: "read" | "write" | "update" }[] = [];
-    if (payload.saveFileAction && payload.saveFileAction.name) {
-      const fileName = path.basename(payload.saveFileAction.name);
-      const filePath = path.join(WORKFILES_DIR, fileName);
-      if (fileName.toLowerCase().endsWith(".pdf")) {
-        await compileTextToPDF(filePath, payload.saveFileAction.content || "", fileName);
-      } else {
-        fs.writeFileSync(filePath, payload.saveFileAction.content, "utf-8");
-      }
-      console.log(`Autonomous Tool executed: Saved file ${filePath}`);
-      filesManipulatedList.push({ name: fileName, action: "write" });
-      payload.text += `\n\n💾 **[Файл успешно сохранен на сервере]:** \`/root/data/workfiles/${fileName}\``;
-    }
-
-    // Log files read if matched
-    if (matchedFilesContent) {
-      filesManipulatedList.unshift({ name: "matched_files", action: "read" });
-    }
-
-    // Persist memory on disk
-    if (payload.updatedMemoryProfile) {
-      saveMemoryState(sessionId, payload.updatedMemoryProfile);
-    }
-
-    // Combine result response
-    return res.json({
-      text: payload.text,
-      thoughtChain: payload.thoughtChain,
-      criticEvaluation: payload.criticEvaluation,
-      saveFileAction: payload.saveFileAction,
-      updatedMemoryProfile: payload.updatedMemoryProfile || currentMemory,
-      filesManipulated: filesManipulatedList,
-      metrics: {
-        ...routerDecision,
-        thoughtChain: payload.thoughtChain,
-        criticEvaluation: payload.criticEvaluation
-      }
-    });
+    // Default simulation fallback when API Key is omitted
+    const fallbackResult = await generateLocalFallbackResponse(
+      message,
+      sessionId,
+      currentMemory,
+      routerDecision,
+      matchedFilesContent,
+      "в„№пёЏ **[РђРІС‚РѕРЅРѕРјРЅС‹Р№ РґРµРјРѕ-СЂРµР¶РёРј]:** РљР»СЋС‡ ROUTER_AI_API_KEY РЅРµ РѕР±РЅР°СЂСѓР¶РµРЅ РІ РѕРєСЂСѓР¶РµРЅРёРё. Р—Р°РїСѓС‰РµРЅ Р»РѕРєР°Р»СЊРЅС‹Р№ СЃРёРјСѓР»СЏС‚РѕСЂ Atlas."
+    );
+    return res.json(fallbackResult);
 
   } catch (error: any) {
-    console.error("Gemini/Atlas Agent Server Error. Activating graceful fallback...", error);
-    try {
-      const errorDetail = error.message || String(error);
-      const prefixWarning = `⚠️ **[Автономный режим]:** В данный момент возникли временные неполадки со связью с ИИ-провайдером (ошибка: *${errorDetail}*).\n` +
-        `Мы временно переключили Atlas в автономный локальный режим бизнес-моделирования, чтобы вы не потеряли контекст. Наша файловая система полностью доступна!`;
-      
-      const currentMemory = loadMemoryState(req.body.sessionId || "default_session");
-      const routerDecision = runModelSelectionRouter(req.body.message, !!(req.body.image && req.body.image.data));
-      
-      let matchedFilesContent = "";
-      try {
-        const files = fs.readdirSync(WORKFILES_DIR).filter(f => f !== ".memory" && !f.startsWith("."));
-        for (const fname of files) {
-          if (req.body.message && req.body.message.toLowerCase().includes(fname.toLowerCase())) {
-            const fpath = path.join(WORKFILES_DIR, fname);
-            const content = fs.readFileSync(fpath, "utf-8");
-            matchedFilesContent += `\n\n--- Содержимое файла "${fname}" ---\n${content}\n---------------------\n`;
-          }
-        }
-      } catch (_) {}
-
-      const fallbackResult = await generateLocalFallbackResponse(
-        req.body.message || "",
-        req.body.sessionId || "default_session",
-        currentMemory,
-        routerDecision,
-        matchedFilesContent,
-        prefixWarning
-      );
-      return res.json(fallbackResult);
-
-    } catch (innerFallbackError: any) {
-      console.error("Critical double fallback crash:", innerFallbackError);
-      return res.status(500).json({ 
-        error: "Ошибка генерации ответа Atlas", 
-        details: error.message || String(error)
-      });
-    }
+    console.error("Critical general handler exception:", error);
+    return res.status(500).json({
+      error: "РљСЂРёС‚РёС‡РµСЃРєР°СЏ РѕС€РёР±РєР° СЃРµСЂРІРµСЂР° Atlas",
+      details: error.message || String(error)
+    });
   }
 });
 
 // Configure static handler
 async function setupServer() {
+  // Sync available Router AI models list on boot
+  await fetchRouterAIModels();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

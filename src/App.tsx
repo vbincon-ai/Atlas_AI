@@ -93,52 +93,17 @@ export default function App() {
     const savedName = localStorage.getItem("atlas_username");
     if (savedName) setUserName(savedName);
 
-    const loadSessions = async () => {
-      try {
-        const res = await fetch("/api/sessions");
-        if (res.ok) {
-          const sessions = await res.json();
-          if (sessions && sessions.length > 0) {
-            setChatSessions(sessions);
-          } else {
-            // Seed the server database with initial templates if empty
-            setChatSessions(INITIAL_SESSIONS);
-            for (const s of INITIAL_SESSIONS) {
-              await fetch("/api/sessions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(s)
-              });
-            }
-          }
-        } else {
-          setChatSessions(INITIAL_SESSIONS);
-        }
-      } catch (err) {
-        console.error("Failed to fetch sessions from server:", err);
-        // Fallback to offline localStorage
-        const savedSessions = localStorage.getItem("atlas_sessions");
-        if (savedSessions) {
-          setChatSessions(JSON.parse(savedSessions));
-        } else {
-          setChatSessions(INITIAL_SESSIONS);
-        }
-      }
-    };
-    loadSessions();
+    const savedSessions = localStorage.getItem("atlas_sessions");
+    if (savedSessions) {
+      setChatSessions(JSON.parse(savedSessions));
+    } else {
+      setChatSessions(INITIAL_SESSIONS);
+    }
   }, []);
 
-  const saveSessionsToCache = (newSessions: ChatSession[], sessionToSync?: ChatSession) => {
+  const saveSessionsToCache = (newSessions: ChatSession[]) => {
     setChatSessions(newSessions);
     localStorage.setItem("atlas_sessions", JSON.stringify(newSessions));
-    
-    if (sessionToSync) {
-      fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sessionToSync)
-      }).catch(err => console.error("Failed to sync session on server:", err));
-    }
   };
 
   const handleUserNameChange = (newName: string) => {
@@ -146,18 +111,9 @@ export default function App() {
     localStorage.setItem("atlas_username", newName);
   };
 
-  const handleClearSessions = async () => {
-    const sessionsToRemove = [...chatSessions];
-    setChatSessions([]);
-    localStorage.setItem("atlas_sessions", JSON.stringify([]));
+  const handleClearSessions = () => {
+    saveSessionsToCache([]);
     setActiveSessionId(null);
-    for (const s of sessionsToRemove) {
-      try {
-        await fetch(`/api/sessions/${s.id}`, { method: "DELETE" });
-      } catch (err) {
-        console.error("Failed to delete session on server during cleanup:", err);
-      }
-    }
   };
 
   const handleSelectSession = (id: string) => {
@@ -165,16 +121,10 @@ export default function App() {
     setIsMobileSidebarOpen(false);
   };
 
-  const handleDeleteSession = async (id: string) => {
+  const handleDeleteSession = (id: string) => {
     const filtered = chatSessions.filter(s => s.id !== id);
-    setChatSessions(filtered);
-    localStorage.setItem("atlas_sessions", JSON.stringify(filtered));
+    saveSessionsToCache(filtered);
     if (activeSessionId === id) setActiveSessionId(null);
-    try {
-      await fetch(`/api/sessions/${id}`, { method: "DELETE" });
-    } catch (err) {
-      console.error("Failed to delete session on server:", err);
-    }
   };
 
   const handleNewChatClick = () => {
@@ -223,8 +173,7 @@ export default function App() {
     };
 
     sessionToUse.messages = [...sessionToUse.messages, newUserMsg];
-    // Sync update to server
-    saveSessionsToCache(updatedSessions, sessionToUse);
+    saveSessionsToCache(updatedSessions);
 
     try {
       // Gather relevant trailing context excerpt
@@ -264,8 +213,31 @@ export default function App() {
       };
 
       sessionToUse.messages = [...sessionToUse.messages, newAiMsg];
-      // Sync update to server
-      saveSessionsToCache([...updatedSessions], sessionToUse);
+      saveSessionsToCache([...updatedSessions]);
+
+      // Check for automatic continuation if it was a draft file (.md)
+      const hasSaveAction = replyData.saveFileAction && replyData.saveFileAction.name;
+      const isMarkdownDraft = hasSaveAction && replyData.saveFileAction.name.toLowerCase().endsWith(".md");
+
+      if (isMarkdownDraft) {
+        let consecutiveContinues = 0;
+        for (let i = sessionToUse.messages.length - 1; i >= 0; i--) {
+          const m = sessionToUse.messages[i];
+          if (m.sender === "user") {
+            if (m.text.trim() === "Продолжить") {
+              consecutiveContinues++;
+            } else {
+              break;
+            }
+          }
+        }
+
+        if (consecutiveContinues < 4) {
+          setTimeout(() => {
+            handleSendMessage("Продолжить");
+          }, 2000);
+        }
+      }
 
     } catch (err: any) {
       console.error(err);
@@ -277,7 +249,7 @@ export default function App() {
         timestamp: new Date().toLocaleTimeString().substring(0, 5)
       };
       sessionToUse.messages = [...sessionToUse.messages, errorMsg];
-      saveSessionsToCache([...updatedSessions], sessionToUse);
+      saveSessionsToCache([...updatedSessions]);
     } finally {
       setIsLoading(false);
     }
@@ -296,7 +268,6 @@ export default function App() {
         activeSessionId={activeSessionId}
         onSelectSession={handleSelectSession}
         onNewChatClick={handleNewChatClick}
-        onDeleteSession={handleDeleteSession}
       />
 
       {/* Main Content Pane */}
@@ -406,6 +377,7 @@ export default function App() {
             userName={userName}
             onChangeUserName={handleUserNameChange}
             onClearChats={handleClearSessions}
+            activeSession={activeSessionObj}
           />
         )}
 

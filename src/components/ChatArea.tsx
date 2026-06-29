@@ -219,7 +219,8 @@ export default function ChatArea({
                       </div>
                       <span className="font-sans text-xs font-bold text-slate-900">Atlas</span>
                       {msg.metrics?.selectedModel && (
-                        <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded font-mono font-medium">
+                        <span className="text-[10px] font-sans text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-semibold border border-slate-200 shadow-sm ml-1 flex items-center gap-1">
+                          <Cpu size={10} className="text-blue-500" />
                           {msg.metrics.selectedModel}
                         </span>
                       )}
@@ -265,18 +266,27 @@ export default function ChatArea({
                       </div>
                     )}
 
-                    {/* Files Manipulated Logs badge */}
-                    {msg.filesManipulated && msg.filesManipulated.length > 0 && (
-                      <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Файловые операции на VPS</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {msg.filesManipulated.map((f, idx) => (
-                            <span key={idx} className="bg-emerald-50 border border-emerald-200 text-emerald-800 font-sans text-[10px] px-2 py-0.5 rounded font-extrabold flex items-center gap-1">
-                              <FileCheck size={10} />
-                              {f.action === 'write' ? 'запись на диск' : 'прочитано с VPS'}: {f.name}
-                            </span>
-                          ))}
-                        </div>
+                    {!isUser && msg.metrics && (
+                      <div className="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
+                        {/* Thought process drawer */}
+                        {msg.metrics.thoughtChain && (
+                          <div className="border border-slate-100 rounded-lg overflow-hidden">
+                            <button
+                              onClick={() => toggleThoughts(msg.id)}
+                              className="w-full bg-slate-50 hover:bg-slate-100 px-3 py-1.5 text-left text-[11px] font-bold text-slate-600 flex justify-between items-center transition-colors font-mono cursor-pointer"
+                            >
+                              <span>🧠 Рассуждения модели (Deep Thinking)</span>
+                              <span className="text-[9px] text-blue-600 bg-blue-50 px-1 py-0.2 rounded font-black">
+                                {expandedThoughtIds[msg.id] ? "Свернуть" : "Развернуть"}
+                              </span>
+                            </button>
+                            {expandedThoughtIds[msg.id] && (
+                              <div className="bg-[#18181b] text-zinc-300 font-mono text-[10.5px] p-3 leading-relaxed border-t border-slate-100 max-h-[160px] overflow-y-auto whitespace-pre-wrap">
+                                {msg.metrics.thoughtChain}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -323,6 +333,12 @@ export default function ChatArea({
               className="whitespace-nowrap px-4 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 transition-colors text-xs font-bold cursor-pointer shadow-sm flex items-center gap-1.5"
             >
               <span>📄 Прислать или сгенерировать PDF</span>
+            </button>
+            <button
+              onClick={() => setInputText("Продолжить генерацию документа (следующий шаг)")}
+              className="whitespace-nowrap px-4 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors text-xs font-bold cursor-pointer shadow-sm flex items-center gap-1.5"
+            >
+              <span>⏩ Продолжить генерацию отчета</span>
             </button>
           </div>
 
